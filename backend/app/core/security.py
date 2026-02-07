@@ -10,3 +10,11 @@ def encrypt_report(data: str) -> str:
 
 def decrypt_report(token: str) -> str:
     return fernet.decrypt(token.encode()).decode()
+
+def encrypt_attachment(base64_data: str) -> bytes:
+    # Convert string to bytes, encrypt
+    return fernet.encrypt(base64_data.encode())
+    
+def decrypt_attachment(encrypted_bytes: bytes) -> str:
+    return fernet.decrypt(encrypted_bytes).decode()
+

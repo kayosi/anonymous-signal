@@ -3,9 +3,8 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, engine
 from app.models.report import Base, Report
 from app.schemas.report import ReportCreate
-from app.core.security import encrypt_report
+from app.core.security import encrypt_report, encrypt_attachment
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Anonymous Signal API")
@@ -20,16 +19,28 @@ def get_db():
 
 @app.post("/report")
 def create_report(report: ReportCreate, db: Session = Depends(get_db)):
+    """
+    NOTE:
+    This endpoint intentionally does not read or store
+    request headers, IP addresses, or client metadata.
+    Fully anonymous by design.
+    """
     try:
         encrypted_content = encrypt_report(report.content)
-        db_report = Report(category=report.category, encrypted_content=encrypted_content)
+        encrypted_attachment = None
+        if report.attachment:
+            encrypted_attachment = encrypt_attachment(report.attachment)
+        db_report = Report(
+            category=report.category,
+            encrypted_content=encrypted_content,
+            encrypted_attachment=encrypted_attachment
+        )
         db.add(db_report)
         db.commit()
         db.refresh(db_report)
         return {"status": "success", "report_id": db_report.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-from app.core.security import decrypt_report
 
 """
 # DECRYPT TEST
