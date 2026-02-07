@@ -4,7 +4,7 @@ from app.core.database import SessionLocal, engine
 from app.models.report import Base, Report
 from app.schemas.report import ReportCreate
 from app.core.security import encrypt_report, encrypt_attachment
-
+from app.models.report_ai import ReportAIAnalysis
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Anonymous Signal API")
