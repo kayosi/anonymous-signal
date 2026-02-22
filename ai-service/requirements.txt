@@ -1,0 +1,30 @@
+# Anonymous Signal - AI Service Dependencies
+# Python 3.11+
+
+# ─── Web Framework ────────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# ─── AI / ML ──────────────────────────────────────────────────────────────
+# Speech transcription
+faster-whisper==1.0.0
+# Zero-shot classification
+transformers==4.41.1
+torch==2.3.0
+# Embeddings & clustering
+sentence-transformers==3.0.1
+scikit-learn==1.5.0
+numpy==1.26.4
+
+# ─── Database (direct asyncpg only - no ORM needed in ai-service) ─────────
+asyncpg==0.29.0
+
+# ─── Encryption ───────────────────────────────────────────────────────────
+cryptography==42.0.7
+
+# ─── Utilities ────────────────────────────────────────────────────────────
+httpx==0.27.0
+structlog==24.1.0
+pydantic==2.7.1
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
