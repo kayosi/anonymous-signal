@@ -89,8 +89,10 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
         response.headers["Pragma"] = "no-cache"
         response.headers["X-Content-Type-Options"] = "nosniff"
         # PRIVACY: Remove server identification
-        response.headers.pop("Server", None)
-        response.headers.pop("X-Powered-By", None)
+        if "server" in response.headers:
+            del response.headers["server"]
+        if "x-powered-by" in response.headers:
+            del response.headers["x-powered-by"]
 
         return response
 
@@ -112,7 +114,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def get_redis(self):
         if self._redis_client is None:
             try:
-                import aioredis
+                import redis.asyncio as aioredis
                 self._redis_client = await aioredis.from_url(
                     settings.REDIS_URL,
                     encoding="utf-8",

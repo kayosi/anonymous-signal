@@ -65,7 +65,7 @@ async def _check_category_surges(db):
     Detect if any category has had a surge in the last 24 hours.
     Creates an alert if threshold is crossed and no recent alert exists for that category.
     """
-    from sqlalchemy import select, func, text
+    from sqlalchemy import select, func, text, desc
     from app.models.models import Report, ReportAIAnalysis, Alert
 
     cutoff_24h = datetime.utcnow() - timedelta(hours=24)

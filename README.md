@@ -214,6 +214,4 @@ anonymous-signal/
 
 ## 📜 License
 
-Built for national public safety — open for government deployment.
-
 _Built for national security. Designed for trust. Guaranteed for privacy._

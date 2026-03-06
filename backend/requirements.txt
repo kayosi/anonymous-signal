@@ -1,24 +1,26 @@
-# Anonymous Signal - AI Service Dependencies
+# Anonymous Signal - Backend API Dependencies
 # Python 3.11+
-# Note: Using >= constraints to avoid "version not found" errors from pip
 
 # ─── Web Framework ────────────────────────────────────────────────────────
 fastapi>=0.111.0,<0.112.0
 uvicorn[standard]>=0.29.0,<0.30.0
 
-# ─── AI / ML ──────────────────────────────────────────────────────────────
-faster-whisper>=1.0.0,<2.0.0
-transformers>=4.41.0,<4.42.0
-torch>=2.3.0,<2.4.0
-sentence-transformers>=3.0.0,<3.1.0
-scikit-learn>=1.5.0,<1.6.0
-numpy>=1.26.0,<2.0.0
-
 # ─── Database ─────────────────────────────────────────────────────────────
 asyncpg>=0.29.0,<0.30.0
+sqlalchemy>=2.0.0,<2.1.0
+alembic>=1.13.0,<1.14.0
+
+# ─── Redis ────────────────────────────────────────────────────────────────
+redis>=5.0.0,<6.0.0
 
 # ─── Encryption ───────────────────────────────────────────────────────────
 cryptography>=42.0.0,<44.0.0
+
+# ─── Auth ─────────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.0,<2.0.0
+bcrypt>=3.2.0,<4.0.0
+python-multipart>=0.0.9,<0.1.0
 
 # ─── Utilities ────────────────────────────────────────────────────────────
 httpx>=0.27.0,<0.28.0
@@ -26,3 +28,5 @@ structlog>=24.1.0,<25.0.0
 pydantic>=2.7.0,<2.8.0
 pydantic-settings>=2.2.0,<2.3.0
 python-dotenv>=1.0.0,<2.0.0
+python-magic>=0.4.27,<0.5.0
+aiofiles>=23.0.0,<24.0.0

@@ -44,6 +44,22 @@ CREATE TABLE IF NOT EXISTS reports (
     CONSTRAINT no_pii_check CHECK (TRUE) -- Placeholder for audit tooling
 );
 
+-- ─── Clusters Table ───────────────────────────────────────────────────────
+-- Groups of similar/related reports detected by clustering algorithm
+CREATE TABLE IF NOT EXISTS clusters (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    category            VARCHAR(64),
+    label               TEXT,           -- Human-readable cluster description
+    centroid_embedding  FLOAT[],        -- Cluster centroid in embedding space
+    report_count        INTEGER DEFAULT 0,
+    first_seen          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_updated        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_active           BOOLEAN DEFAULT TRUE,
+    -- Urgency escalated when cluster grows rapidly
+    escalation_flag     BOOLEAN DEFAULT FALSE,
+    notes               TEXT
+);
+
 -- ─── AI Analysis Table ────────────────────────────────────────────────────
 -- One report can have multiple analyses (e.g., v1 model → v2 model upgrade)
 CREATE TABLE IF NOT EXISTS report_ai_analysis (
@@ -79,22 +95,6 @@ CREATE TABLE IF NOT EXISTS report_ai_analysis (
 
     -- AI-generated summary of this report
     ai_summary          TEXT
-);
-
--- ─── Clusters Table ───────────────────────────────────────────────────────
--- Groups of similar/related reports detected by clustering algorithm
-CREATE TABLE IF NOT EXISTS clusters (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    category            VARCHAR(64),
-    label               TEXT,           -- Human-readable cluster description
-    centroid_embedding  FLOAT[],        -- Cluster centroid in embedding space
-    report_count        INTEGER DEFAULT 0,
-    first_seen          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_updated        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active           BOOLEAN DEFAULT TRUE,
-    -- Urgency escalated when cluster grows rapidly
-    escalation_flag     BOOLEAN DEFAULT FALSE,
-    notes               TEXT
 );
 
 -- ─── Alerts Table ─────────────────────────────────────────────────────────
@@ -148,6 +148,6 @@ CREATE INDEX idx_alerts_acknowledged ON alerts(acknowledged);
 INSERT INTO analyst_users (username, password_hash, role)
 VALUES (
     'admin',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4J/HS.iRpa',
+    '$2b$12$ACuYIuAqWuLb.A.1mgmTAOFT9aoqGm1133X.9GOJR7Vaw73DjlqF2',
     'admin'
 ) ON CONFLICT DO NOTHING;
