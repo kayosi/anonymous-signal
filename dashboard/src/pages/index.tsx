@@ -10,7 +10,7 @@ import {
   MessageSquare, Send, RefreshCw,
   Activity, Zap, LogOut, CheckCircle,
   FileText, Clock, AlertOctagon,
-  BarChart2, Layers
+  BarChart2, Layers, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -94,6 +94,26 @@ interface Cluster {
   notes?: string;
 }
 
+interface ReportItem {
+  id: string;
+  submitted_at: string;
+  user_category: string | null;
+  category: string | null;
+  status: string;
+  urgency_level: string | null;
+  severity_score: number | null;
+  has_audio: boolean;
+  has_image: boolean;
+}
+
+interface PaginatedReports {
+  items: ReportItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 interface IntelligenceSummary {
   window_hours: number;
   total_reports_in_window: number;
@@ -114,7 +134,6 @@ interface ChatMessage {
 type Tab = 'overview' | 'reports' | 'clusters' | 'alerts' | 'intelligence' | 'chat';
 type Role = 'analyst' | 'senior_analyst' | 'admin';
 
-// Custom XAxis tick — avoids TypeScript error with angle/textAnchor on tick prop
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const AngledTick = (props: any) => {
   const { x, y, payload } = props;
@@ -229,6 +248,17 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, { background: string; color: string; border: string }> = {
+    pending:    { background: 'rgba(51,65,85,0.6)',   color: '#94a3b8', border: '1px solid #475569' },
+    processing: { background: 'rgba(30,64,175,0.3)',  color: '#93c5fd', border: '1px solid #1d4ed8' },
+    analyzed:   { background: 'rgba(6,78,59,0.4)',    color: '#6ee7b7', border: '1px solid #065f46' },
+    flagged:    { background: 'rgba(127,29,29,0.4)',  color: '#fca5a5', border: '1px solid #991b1b' },
+  };
+  const s = styles[status] || styles.pending;
+  return <span style={{ ...s, fontSize: '0.7rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: '9999px' }}>{status}</span>;
+}
+
 export default function Dashboard() {
   const [token, setToken] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('analyst');
@@ -236,6 +266,11 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [intelligence, setIntelligence] = useState<IntelligenceSummary | null>(null);
+  const [reports, setReports] = useState<PaginatedReports | null>(null);
+  const [reportsPage, setReportsPage] = useState(1);
+  const [reportsStatusFilter, setReportsStatusFilter] = useState('');
+  const [reportsUrgencyFilter, setReportsUrgencyFilter] = useState('');
+  const [reportsLoading, setReportsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<Tab>('overview');
@@ -290,6 +325,22 @@ export default function Dashboard() {
     }
   }, [token]);
 
+  const fetchReports = useCallback(async (page = 1, statusFilter = '', urgencyFilter = '') => {
+    if (!token) return;
+    setReportsLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), page_size: '20' });
+      if (statusFilter) params.append('status_filter', statusFilter);
+      if (urgencyFilter) params.append('urgency_filter', urgencyFilter);
+      const res = await api.get(`/reports/?${params}`);
+      setReports(res.data);
+    } catch (err) {
+      console.error('Reports fetch failed:', err);
+    } finally {
+      setReportsLoading(false);
+    }
+  }, [token]);
+
   const fetchIntelligence = useCallback(async () => {
     if (!token || role === 'analyst') return;
     try {
@@ -307,6 +358,13 @@ export default function Dashboard() {
     pollRef.current = setInterval(fetchAll, POLL_INTERVAL_MS);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [token, fetchAll, fetchIntelligence]);
+
+  // Fetch reports when tab is opened or filters change
+  useEffect(() => {
+    if (activeTab === 'reports' && token) {
+      fetchReports(reportsPage, reportsStatusFilter, reportsUrgencyFilter);
+    }
+  }, [activeTab, reportsPage, reportsStatusFilter, reportsUrgencyFilter, fetchReports, token]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
@@ -353,6 +411,14 @@ export default function Dashboard() {
   const unacked = alerts.filter((a) => !a.acknowledged);
   const critical = alerts.filter((a) => a.severity_level === 'critical' && !a.acknowledged);
 
+  // Report status counts from stats
+  const statusCounts = {
+    pending:    stats?.pending_reports ?? 0,
+    processing: 0,
+    analyzed:   (stats?.total_reports ?? 0) - (stats?.pending_reports ?? 0),
+    flagged:    stats?.high_urgency_reports ?? 0,
+  };
+
   const tabs: { id: Tab; label: string; icon: React.ElementType; badge?: number }[] = [
     { id: 'overview',     label: 'Overview',     icon: BarChart2 },
     { id: 'alerts',       label: 'Alerts',        icon: Bell,         badge: unacked.length },
@@ -364,6 +430,11 @@ export default function Dashboard() {
 
   const card: React.CSSProperties = { background: '#1e293b', borderRadius: '16px', border: '1px solid #334155', padding: '1.25rem' };
   const sectionTitle: React.CSSProperties = { fontSize: '0.875rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' };
+
+  const selectStyle: React.CSSProperties = {
+    background: '#334155', border: '1px solid #475569', borderRadius: '8px',
+    color: '#cbd5e1', padding: '0.375rem 0.75rem', fontSize: '0.8rem', cursor: 'pointer', outline: 'none',
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#0f172a', color: 'white', fontFamily: 'system-ui, sans-serif' }}>
@@ -464,7 +535,6 @@ export default function Dashboard() {
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={categoryData} margin={{ top: 5, right: 10, left: 0, bottom: 55 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    {/* Use custom AngledTick component to avoid TypeScript angle/textAnchor error */}
                     <XAxis dataKey="name" tick={<AngledTick />} interval={0} stroke="#64748b" />
                     <YAxis stroke="#64748b" tick={{ fontSize: 11, fill: '#64748b' }} />
                     <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#e2e8f0' }} />
@@ -529,7 +599,7 @@ export default function Dashboard() {
               <span style={{ fontSize: '0.875rem', color: '#64748b' }}>{clusters.length} active patterns</span>
             </div>
             {clusters.length === 0
-              ? <div style={{ ...card, textAlign: 'center', padding: '3rem' }}><Layers style={{ width: 48, height: 48, margin: '0 auto 0.75rem', opacity: 0.2 }} /><p style={{ color: '#64748b', margin: 0 }}>No clusters detected yet.</p></div>
+              ? <div style={{ ...card, textAlign: 'center', padding: '3rem' }}><Layers style={{ width: 48, height: 48, margin: '0 auto 0.75rem', opacity: 0.2 }} /><p style={{ color: '#64748b', margin: 0 }}>No clusters detected yet. Submit more reports to detect patterns.</p></div>
               : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
                   {clusters.map((c) => (
                     <div key={c.id} style={{ ...card, border: `1px solid ${c.escalation_flag ? '#c2410c' : '#334155'}` }}>
@@ -556,19 +626,119 @@ export default function Dashboard() {
 
         {/* REPORTS */}
         {activeTab === 'reports' && (
-          <div>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: 700, marginTop: 0 }}>Reports</h2>
-            <div style={card}>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: 0 }}>Query reports via <code style={{ background: '#334155', padding: '0.125rem 0.375rem', borderRadius: '4px', color: '#93c5fd' }}>GET /api/v1/reports/</code></p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
-                {['pending', 'processing', 'analyzed', 'flagged'].map((s) => (
-                  <div key={s} style={{ background: '#334155', borderRadius: '10px', padding: '0.75rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem', textTransform: 'capitalize' }}>{s}</div>
-                    <div style={{ fontWeight: 700 }}>—</div>
-                  </div>
-                ))}
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700 }}>Reports</h2>
+              <button onClick={() => fetchReports(reportsPage, reportsStatusFilter, reportsUrgencyFilter)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', background: '#334155', border: 'none', color: '#cbd5e1', fontSize: '0.8rem', padding: '0.375rem 0.75rem', borderRadius: '8px', cursor: 'pointer' }}>
+                <RefreshCw style={{ width: 12, height: 12 }} /> Refresh
+              </button>
             </div>
+
+            {/* Status summary */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
+              {(['pending', 'processing', 'analyzed', 'flagged'] as const).map((s) => (
+                <button key={s} onClick={() => { setReportsStatusFilter(reportsStatusFilter === s ? '' : s); setReportsPage(1); }}
+                  style={{ background: reportsStatusFilter === s ? '#334155' : '#1e293b', border: `1px solid ${reportsStatusFilter === s ? '#60a5fa' : '#334155'}`, borderRadius: '10px', padding: '0.75rem', textAlign: 'center', cursor: 'pointer', color: 'white' }}>
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem', textTransform: 'capitalize' }}>{s}</div>
+                  <div style={{ fontWeight: 700 }}>{statusCounts[s]}</div>
+                </button>
+              ))}
+            </div>
+
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Filter:</span>
+              <select value={reportsStatusFilter} onChange={(e) => { setReportsStatusFilter(e.target.value); setReportsPage(1); }} style={selectStyle}>
+                <option value="">All statuses</option>
+                <option value="pending">pending</option>
+                <option value="processing">processing</option>
+                <option value="analyzed">analyzed</option>
+                <option value="flagged">flagged</option>
+              </select>
+              <select value={reportsUrgencyFilter} onChange={(e) => { setReportsUrgencyFilter(e.target.value); setReportsPage(1); }} style={selectStyle}>
+                <option value="">All urgency</option>
+                <option value="critical">critical</option>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+              </select>
+              {(reportsStatusFilter || reportsUrgencyFilter) && (
+                <button onClick={() => { setReportsStatusFilter(''); setReportsUrgencyFilter(''); setReportsPage(1); }}
+                  style={{ fontSize: '0.75rem', background: 'none', border: '1px solid #475569', color: '#94a3b8', padding: '0.3rem 0.6rem', borderRadius: '6px', cursor: 'pointer' }}>
+                  Clear filters
+                </button>
+              )}
+              <span style={{ fontSize: '0.8rem', color: '#64748b', marginLeft: 'auto' }}>{reports?.total ?? 0} total</span>
+            </div>
+
+            {/* Reports list */}
+            {reportsLoading ? (
+              <div style={{ ...card, textAlign: 'center', padding: '3rem' }}>
+                <div style={{ width: 32, height: 32, border: '4px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 1rem' }} />
+                <p style={{ color: '#94a3b8', margin: 0 }}>Loading reports…</p>
+              </div>
+            ) : !reports || reports.items.length === 0 ? (
+              <div style={{ ...card, textAlign: 'center', padding: '3rem' }}>
+                <FileText style={{ width: 48, height: 48, margin: '0 auto 0.75rem', opacity: 0.2 }} />
+                <p style={{ color: '#64748b', margin: 0 }}>No reports found.</p>
+                <button onClick={() => fetchReports(1, '', '')} style={{ marginTop: '1rem', fontSize: '0.8rem', background: '#334155', border: 'none', color: '#cbd5e1', padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer' }}>
+                  Load reports
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {reports.items.map((report) => (
+                    <div key={report.id} style={{ ...card, padding: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
+                            <StatusBadge status={report.status} />
+                            {report.urgency_level && <UrgencyBadge level={report.urgency_level} />}
+                            {report.category && <CategoryBadge category={report.category} />}
+                            {report.has_audio && <span style={{ fontSize: '0.7rem', color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', padding: '0.1rem 0.4rem', borderRadius: '6px' }}>🎤 audio</span>}
+                            {report.has_image && <span style={{ fontSize: '0.7rem', color: '#a78bfa', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)', padding: '0.1rem 0.4rem', borderRadius: '6px' }}>📷 image</span>}
+                          </div>
+                          {report.user_category && (
+                            <p style={{ margin: '0 0 0.4rem', fontSize: '0.875rem', color: '#94a3b8' }}>
+                              Category: {report.user_category.replace(/_/g, ' ')}
+                            </p>
+                          )}
+                          <div style={{ fontSize: '0.7rem', color: '#64748b', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            <span><Clock style={{ width: 10, height: 10, display: 'inline', marginRight: '0.2rem' }} />{new Date(report.submitted_at).toLocaleString()}</span>
+                            <span style={{ fontFamily: 'monospace' }}>ID: {report.id.slice(0, 8)}…</span>
+                          </div>
+                        </div>
+                        {report.severity_score != null && (
+                          <div style={{ textAlign: 'center', minWidth: 56 }}>
+                            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: report.severity_score >= 70 ? '#f87171' : report.severity_score >= 40 ? '#fbbf24' : '#4ade80' }}>
+                              {report.severity_score}
+                            </div>
+                            <div style={{ fontSize: '0.65rem', color: '#64748b' }}>severity</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {reports.total_pages > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <button onClick={() => setReportsPage((p) => Math.max(1, p - 1))} disabled={reportsPage === 1}
+                      style={{ background: '#334155', border: 'none', color: reportsPage === 1 ? '#475569' : '#cbd5e1', borderRadius: '8px', padding: '0.375rem 0.75rem', cursor: reportsPage === 1 ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}>
+                      <ChevronLeft style={{ width: 16, height: 16 }} />
+                    </button>
+                    <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Page {reportsPage} of {reports.total_pages}</span>
+                    <button onClick={() => setReportsPage((p) => Math.min(reports.total_pages, p + 1))} disabled={reportsPage === reports.total_pages}
+                      style={{ background: '#334155', border: 'none', color: reportsPage === reports.total_pages ? '#475569' : '#cbd5e1', borderRadius: '8px', padding: '0.375rem 0.75rem', cursor: reportsPage === reports.total_pages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}>
+                      <ChevronRight style={{ width: 16, height: 16 }} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
 

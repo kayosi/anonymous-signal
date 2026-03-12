@@ -107,11 +107,13 @@ class ReportListItem(BaseModel):
     """Lightweight report item for list view."""
     id: uuid.UUID
     status: str
-    user_category: Optional[str]
+    user_category: Optional[str] = None
     submitted_at: datetime
     urgency_level: Optional[str] = None
     severity_score: Optional[int] = None
     category: Optional[str] = None
+    has_audio: bool = False
+    has_image: bool = False
 
     class Config:
         from_attributes = True
@@ -122,6 +124,7 @@ class PaginatedReports(BaseModel):
     total: int
     page: int
     page_size: int
+    total_pages: int = 1
 
 
 # ─── Cluster Schemas ───────────────────────────────────────────────────────

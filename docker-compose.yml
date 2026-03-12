@@ -14,7 +14,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    # PRIVACY: Database is NOT exposed externally
     expose:
       - "5432"
     healthcheck:
@@ -26,7 +25,6 @@ services:
     networks:
       - internal_net
 
-  # ─── Redis (Rate Limiting & Cache) ────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: anon_signal_redis
@@ -36,7 +34,6 @@ services:
     networks:
       - internal_net
 
-  # ─── FastAPI Backend ───────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -53,7 +50,6 @@ services:
       - MAX_AUDIO_SIZE_MB=${MAX_AUDIO_SIZE_MB:-10}
       - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-5}
       - SCHEDULER_INTERVAL_SECONDS=${SCHEDULER_INTERVAL_SECONDS:-300}
-      # PRIVACY: Explicitly disable request logging
       - DISABLE_ACCESS_LOGS=true
       - STORE_IP_ADDRESSES=false
       - STORE_USER_AGENTS=false
@@ -71,7 +67,6 @@ services:
       - public_net
     restart: unless-stopped
 
-  # ─── AI Microservice ───────────────────────────────────────────────────────
   ai-service:
     build:
       context: ./ai-service
@@ -84,10 +79,18 @@ services:
       - CLASSIFICATION_MODEL=${CLASSIFICATION_MODEL:-facebook/bart-large-mnli}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
       - UPLOAD_DIR=/app/encrypted_uploads
+      - TRANSFORMERS_CACHE=/app/models
+      - HF_HOME=/app/models
+      - SENTENCE_TRANSFORMERS_HOME=/app/models
+      - HF_DATASETS_CACHE=/app/models
+      - TRANSFORMERS_OFFLINE=1
+      - HF_HUB_OFFLINE=1
     volumes:
       - encrypted_uploads:/app/encrypted_uploads:ro
-      - ai_model_cache:/root/.cache/huggingface
-    # SECURITY: AI service is NOT exposed externally — internal only
+      # ── Persistent model cache ───────────────────────────────────────────
+      # Models saved to ./ai-models on your host machine (C:\D\anonymous-signal\ai-models)
+      # After first download they NEVER re-download on rebuild or docker-compose down
+      - ./ai-models:/app/models
     expose:
       - "8001"
     depends_on:
@@ -96,7 +99,6 @@ services:
     networks:
       - internal_net
     restart: unless-stopped
-    # AI service needs more memory for ML models
     deploy:
       resources:
         limits:
@@ -104,14 +106,13 @@ services:
         reservations:
           memory: 2G
 
-  # ─── Next.js Dashboard ────────────────────────────────────────────────────
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
     container_name: anon_signal_dashboard
     environment:
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost/api/v1}
       - NODE_ENV=production
     expose:
       - "3000"
@@ -122,7 +123,6 @@ services:
       - public_net
     restart: unless-stopped
 
-  # ─── Nginx Reverse Proxy ──────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
     container_name: anon_signal_nginx
@@ -141,26 +141,19 @@ services:
       - internal_net
     restart: unless-stopped
 
-# ─── Volumes ──────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
     driver: local
   encrypted_uploads:
-    driver: local
-  ai_model_cache:
     driver: local
   nginx_ssl:
     driver: local
   certbot_www:
     driver: local
 
-# ─── Networks ─────────────────────────────────────────────────────────────────
 networks:
-  # Internal network — DB, Redis, AI service. Never routed to internet.
   internal_net:
     driver: bridge
     internal: true
-
-  # Public network — only Nginx and Backend are here
   public_net:
     driver: bridge

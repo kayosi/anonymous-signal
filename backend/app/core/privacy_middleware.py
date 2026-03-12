@@ -5,7 +5,7 @@ This is the MOST CRITICAL component of the anonymity guarantee.
 
 Every request passes through PrivacyMiddleware BEFORE any handler sees it.
 The middleware:
-  1. Strips X-Forwarded-For and all IP-revealing headers
+  1. Strips all IP-revealing headers (including forwarded-for variants)
   2. Drops User-Agent from scope
   3. Removes any session/cookie identifiers
   4. Adds privacy-protective response headers
@@ -76,9 +76,8 @@ class PrivacyMiddleware(BaseHTTPMiddleware):
         request.scope["headers"] = cleaned_headers
 
         # ── Overwrite client tuple to prevent IP exposure ──────────────────
-        # request.client returns (host, port) — we zero it out
-        # PRIVACY: This guarantees that even if a developer calls
-        # `request.client.host` in a route, they get None
+        # Zeroing out scope["client"] guarantees that route handlers
+        # cannot access any identifying connection info whatsoever.
         request.scope["client"] = None
 
         # ── Process request ────────────────────────────────────────────────

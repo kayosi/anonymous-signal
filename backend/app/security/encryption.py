@@ -15,6 +15,7 @@ encrypted and unreadable without the encryption key.
 import base64
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -135,10 +136,19 @@ class FileEncryptionService:
         # Encrypt
         encrypted_data = self.encryption.encrypt_bytes(clean_data)
 
-        # Save to disk with anonymous filename
+        # Write to temp file first, then move atomically — ensures partial
+        # writes never leave corrupt data. Temp file is always cleaned up.
         file_path = self.upload_dir / f"{file_ref}.enc"
-        with open(file_path, "wb") as f:
-            f.write(encrypted_data)
+        tmp_path = None
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=self.upload_dir, suffix=".tmp")
+            with os.fdopen(fd, "wb") as f:
+                f.write(encrypted_data)
+            os.replace(tmp_path, file_path)
+            tmp_path = None  # Ownership transferred — no cleanup needed
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
         logger.info("encrypted_file_saved", file_type=file_type, size_bytes=len(encrypted_data))
         return str(file_path)

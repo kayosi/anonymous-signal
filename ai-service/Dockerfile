@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --timeout 300 --retries 5 \
 # Step 3: torch CPU-only (~250MB vs 779MB GPU version)
 RUN pip install --no-cache-dir --timeout 300 --retries 5 \
     --extra-index-url https://download.pytorch.org/whl/cpu \
-    "torch==2.3.1+cpu"
+    "torch>=2.3.0,<2.4.0"
 
 # Step 4: transformers + tokenizers (depends on torch)
 RUN pip install --no-cache-dir --timeout 300 --retries 5 \
@@ -43,6 +43,14 @@ RUN pip install --no-cache-dir --timeout 300 --retries 5 \
 # Step 6: faster-whisper (ctranslate2 + onnxruntime are large, separate layer)
 RUN pip install --no-cache-dir --timeout 300 --retries 5 \
     "faster-whisper>=1.0.0,<2.0.0"
+
+# Step 7: Pre-download models into /app/models (owned by aiuser)
+ENV TRANSFORMERS_CACHE=/app/models \
+    HF_HOME=/app/models \
+    SENTENCE_TRANSFORMERS_HOME=/app/models
+
+COPY download_models.py .
+RUN python3 download_models.py
 
 COPY *.py ./
 

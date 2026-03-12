@@ -94,8 +94,7 @@ class ClusteringService:
 
         # Generate embedding for this report
         embedding = self.embeddings.encode(text)
-        if not embedding:
-            return None
+        use_category_fallback = not embedding
 
         # Load active clusters for same category
         result = await db.execute(
@@ -113,25 +112,35 @@ class ClusteringService:
         best_cluster = None
         best_similarity = 0.0
 
-        for cluster in existing_clusters:
-            if cluster.centroid_embedding:
-                sim = self.embeddings.cosine_similarity(
-                    embedding, cluster.centroid_embedding
-                )
-                if sim > best_similarity:
-                    best_similarity = sim
-                    best_cluster = cluster
+        if use_category_fallback:
+            # No embeddings available — use category-based clustering as fallback
+            # Group all reports in same category into one cluster per category
+            if existing_clusters:
+                best_cluster = existing_clusters[0]
+                best_similarity = CLUSTER_SIMILARITY_THRESHOLD  # force assignment
+        else:
+            for cluster in existing_clusters:
+                if cluster.centroid_embedding:
+                    sim = self.embeddings.cosine_similarity(
+                        embedding, cluster.centroid_embedding
+                    )
+                    if sim > best_similarity:
+                        best_similarity = sim
+                        best_cluster = cluster
 
         if best_cluster and best_similarity >= CLUSTER_SIMILARITY_THRESHOLD:
             # Assign to existing cluster and update centroid
             new_count = best_cluster.report_count + 1
 
-            # Rolling average centroid update
-            old_centroid = np.array(best_cluster.centroid_embedding)
-            new_embedding = np.array(embedding)
-            updated_centroid = (
-                (old_centroid * best_cluster.report_count + new_embedding) / new_count
-            ).tolist()
+            # Rolling average centroid update (skip if no embeddings)
+            if embedding and best_cluster.centroid_embedding:
+                old_centroid = np.array(best_cluster.centroid_embedding)
+                new_embedding = np.array(embedding)
+                updated_centroid = (
+                    (old_centroid * best_cluster.report_count + new_embedding) / new_count
+                ).tolist()
+            else:
+                updated_centroid = best_cluster.centroid_embedding
 
             await db.execute(
                 update(Cluster)
@@ -162,7 +171,7 @@ class ClusteringService:
                 id=uuid.uuid4(),
                 category=category,
                 label=self._generate_cluster_label(text, category),
-                centroid_embedding=embedding,
+                centroid_embedding=embedding if embedding else None,
                 report_count=1,
                 is_active=True,
             )

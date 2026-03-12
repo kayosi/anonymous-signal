@@ -103,7 +103,7 @@ class _PrivacyNoticeScreenState extends State<PrivacyNoticeScreen> {
                             'No account. No phone number. No email. Reports are completely anonymous.',
                       ),
                       _PrivacyItem(
-                        icon: Icons.devices_off,
+                        icon: Icons.phonelink_erase,
                         title: 'No Device Tracking',
                         description:
                             'Your IP address, device fingerprint, and browser details are never stored.',

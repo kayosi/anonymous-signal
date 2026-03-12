@@ -225,43 +225,56 @@ async def list_reports(
     page_size = min(page_size, 100)
     offset = (page - 1) * page_size
 
-    # Base query
-    query = (
-        select(Report, ReportAIAnalysis)
-        .outerjoin(
-            ReportAIAnalysis,
-            and_(
-                ReportAIAnalysis.report_id == Report.id,
-                ReportAIAnalysis.id == (
-                    select(ReportAIAnalysis.id)
-                    .where(ReportAIAnalysis.report_id == Report.id)
-                    .order_by(desc(ReportAIAnalysis.analyzed_at))
-                    .limit(1)
-                    .scalar_subquery()
-                )
-            )
-        )
+    import math
+
+    # Step 1: fetch reports (no correlated subquery)
+    report_query = (
+        select(Report)
         .where(Report.is_archived == False)
         .order_by(desc(Report.submitted_at))
-        .offset(offset)
-        .limit(page_size)
     )
-
     if status_filter:
-        query = query.where(Report.status == status_filter)
+        report_query = report_query.where(Report.status == status_filter)
 
-    result = await db.execute(query)
-    rows = result.all()
-
-    # Count query
     count_query = select(func.count(Report.id)).where(Report.is_archived == False)
     if status_filter:
         count_query = count_query.where(Report.status == status_filter)
-    total = await db.scalar(count_query)
+    total = await db.scalar(count_query) or 0
 
+    result = await db.execute(report_query.offset(offset).limit(page_size))
+    reports_page = result.scalars().all()
+
+    if not reports_page:
+        return PaginatedReports(
+            items=[],
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=max(1, math.ceil(total / page_size)) if total > 0 else 1,
+        )
+
+    # Step 2: fetch latest analysis per report using DISTINCT ON
+    report_ids = [r.id for r in reports_page]
+    from sqlalchemy import text
+    analysis_sql = text("""
+        SELECT DISTINCT ON (report_id)
+            id, report_id, category, urgency_level, severity_score, analyzed_at
+        FROM report_ai_analysis
+        WHERE report_id = ANY(:ids)
+        ORDER BY report_id, analyzed_at DESC
+    """)
+    analysis_result = await db.execute(analysis_sql, {"ids": report_ids})
+    analyses_by_report = {row.report_id: row for row in analysis_result}
+
+    # Step 3: build response
     items = []
-    for report, analysis in rows:
-        item = ReportListItem(
+    for report in reports_page:
+        analysis = analyses_by_report.get(report.id)
+        if urgency_filter and (not analysis or analysis.urgency_level != urgency_filter):
+            continue
+        if category_filter and (not analysis or analysis.category != category_filter):
+            continue
+        items.append(ReportListItem(
             id=report.id,
             status=report.status,
             user_category=report.user_category,
@@ -269,14 +282,16 @@ async def list_reports(
             urgency_level=analysis.urgency_level if analysis else None,
             severity_score=analysis.severity_score if analysis else None,
             category=analysis.category if analysis else None,
-        )
-        items.append(item)
+            has_audio=report.has_audio or False,
+            has_image=report.has_image or False,
+        ))
 
     return PaginatedReports(
         items=items,
-        total=total or 0,
+        total=total,
         page=page,
         page_size=page_size,
+        total_pages=max(1, math.ceil(total / page_size)) if total > 0 else 1,
     )
 
 

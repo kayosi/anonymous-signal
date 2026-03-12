@@ -11,8 +11,7 @@ import 'package:mime/mime.dart';
 /// No device ID, no app ID headers are sent.
 class ReportService extends ChangeNotifier {
   // Configure API URL from environment or default
-  static const String _baseUrl =
-      String.fromEnvironment('API_URL', defaultValue: 'http://localhost:8000/api/v1');
+  static const String _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://192.168.100.78/api/v1');
 
   bool _isLoading = false;
   String? _lastError;
@@ -93,7 +92,8 @@ class ReportService extends ChangeNotifier {
       // Send request
       final streamedResponse = await request.send().timeout(
         const Duration(seconds: 30),
-        onTimeout: () => throw Exception('Connection timed out. Please try again.'),
+        onTimeout: () =>
+            throw Exception('Connection timed out. Please try again.'),
       );
 
       final response = await http.Response.fromStream(streamedResponse);
@@ -104,7 +104,9 @@ class ReportService extends ChangeNotifier {
         _lastReportId = reportId;
         return reportId;
       } else if (response.statusCode == 429) {
-        throw Exception('Service temporarily at capacity. Please try again in a few minutes.');
+        throw Exception(
+          'Service temporarily at capacity. Please try again in a few minutes.',
+        );
       } else if (response.statusCode >= 500) {
         throw Exception('Server error. Please try again later.');
       } else {
@@ -112,7 +114,9 @@ class ReportService extends ChangeNotifier {
         throw Exception(data['detail'] ?? 'Submission failed');
       }
     } on SocketException {
-      throw Exception('No internet connection. Please check your network and try again.');
+      throw Exception(
+        'No internet connection. Please check your network and try again.',
+      );
     } finally {
       _isLoading = false;
       notifyListeners();
