@@ -6,12 +6,12 @@ import 'screens/home_screen.dart';
 import 'screens/submit_report_screen.dart';
 import 'screens/privacy_notice_screen.dart';
 import 'screens/confirmation_screen.dart';
+import 'screens/track_report_screen.dart';
 import 'services/report_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to portrait for consistent UX
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -41,6 +41,7 @@ class AnonymousSignalApp extends StatelessWidget {
           '/home': (ctx) => const HomeScreen(),
           '/submit': (ctx) => const SubmitReportScreen(),
           '/confirmation': (ctx) => const ConfirmationScreen(),
+          '/track': (ctx) => const TrackReportScreen(),
         },
       ),
     );

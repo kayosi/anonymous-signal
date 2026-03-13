@@ -56,8 +56,12 @@ class Report(Base):
     # Soft delete
     is_archived = Column(Boolean, default=False)
 
+    # Anonymous tracking code (bcrypt hashed) — given to reporter once on submission
+    tracking_code_hash = Column(Text, nullable=True)
+
     # Relationships
     ai_analyses = relationship("ReportAIAnalysis", back_populates="report", cascade="all, delete-orphan")
+    messages = relationship("ReportMessage", back_populates="report", cascade="all, delete-orphan", order_by="ReportMessage.created_at")
 
 
 class ReportAIAnalysis(Base):
@@ -141,6 +145,25 @@ class Alert(Base):
 
     # Relationship
     cluster = relationship("Cluster", back_populates="alerts")
+
+
+class ReportMessage(Base):
+    """
+    Anonymous chat messages between analysts and reporters.
+    Reporter identified only by their tracking code — no PII stored.
+    """
+    __tablename__ = "report_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_id = Column(UUID(as_uuid=True), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False)
+    sender = Column(String(16), nullable=False)  # 'analyst' or 'reporter'
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_by_analyst = Column(Boolean, default=False)
+    read_by_reporter = Column(Boolean, default=False)
+
+    # Relationships
+    report = relationship("Report", back_populates="messages")
 
 
 class AnalystUser(Base):

@@ -80,7 +80,8 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
     }
 
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/report_audio_${DateTime.now().millisecondsSinceEpoch}.wav';
+    final path =
+        '${dir.path}/report_audio_${DateTime.now().millisecondsSinceEpoch}.wav';
 
     await _recorder.start(
       const RecordConfig(encoder: AudioEncoder.wav),
@@ -144,7 +145,9 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
   // ─── Submission ───────────────────────────────────────────────────────────
 
   Future<void> _submitReport() async {
-    if (_textController.text.trim().isEmpty && _audioPath == null && _selectedImage == null) {
+    if (_textController.text.trim().isEmpty &&
+        _audioPath == null &&
+        _selectedImage == null) {
       _showSnackBar('Please add a description, audio, or image', isError: true);
       return;
     }
@@ -166,7 +169,10 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
       Navigator.pushReplacementNamed(
         context,
         '/confirmation',
-        arguments: reportId,
+        arguments: <String, String>{
+          'report_id': reportId,
+          'tracking_code': service.lastTrackingCode ?? '',
+        },
       );
     } catch (e) {
       if (!mounted) return;
@@ -219,7 +225,10 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
                   SizedBox(width: 8),
                   Text(
                     'This report is 100% anonymous',
-                    style: TextStyle(color: Colors.blue, fontSize: 12, fontWeight: FontWeight.w500),
+                    style: TextStyle(
+                        color: Colors.blue,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
@@ -306,7 +315,8 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
                 borderRadius: BorderRadius.circular(12),
                 child: Stack(
                   children: [
-                    Image.file(_selectedImage!, height: 120, width: double.infinity, fit: BoxFit.cover),
+                    Image.file(_selectedImage!,
+                        height: 120, width: double.infinity, fit: BoxFit.cover),
                     Positioned(
                       top: 8,
                       right: 8,
@@ -318,7 +328,8 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           padding: const EdgeInsets.all(4),
-                          child: const Icon(Icons.close, color: Colors.white, size: 16),
+                          child: const Icon(Icons.close,
+                              color: Colors.white, size: 16),
                         ),
                       ),
                     ),
@@ -347,7 +358,8 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
               decoration: InputDecoration(
                 hintText: 'e.g., "Northern District", "City Hospital area"',
                 hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                prefixIcon: const Icon(Icons.location_on_outlined, color: Colors.grey),
+                prefixIcon:
+                    const Icon(Icons.location_on_outlined, color: Colors.grey),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide(color: Colors.grey.shade200),
@@ -381,14 +393,17 @@ class _SubmitReportScreenState extends State<SubmitReportScreen> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2),
                       )
                     : const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.send, size: 18),
                           SizedBox(width: 8),
-                          Text('Submit Anonymously', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                          Text('Submit Anonymously',
+                              style: TextStyle(
+                                  fontSize: 16, fontWeight: FontWeight.w600)),
                         ],
                       ),
               ),
@@ -412,7 +427,8 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       label,
-      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+      style: const TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF374151)),
     );
   }
 }
@@ -541,7 +557,8 @@ class _AttachButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _AttachButton({required this.icon, required this.label, required this.onTap});
+  const _AttachButton(
+      {required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -559,7 +576,8 @@ class _AttachButton extends StatelessWidget {
           children: [
             Icon(icon, size: 18, color: Colors.grey.shade600),
             const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+            Text(label,
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
           ],
         ),
       ),

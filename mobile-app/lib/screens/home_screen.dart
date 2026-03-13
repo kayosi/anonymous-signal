@@ -6,12 +6,18 @@ class HomeScreen extends StatelessWidget {
 
   static const categories = [
     _Category('Corruption', Icons.gavel, Color(0xFFF59E0B), 'corruption'),
-    _Category('Crime Signal', Icons.warning_amber, Color(0xFFEF4444), 'crime_signals'),
-    _Category('Public Safety', Icons.security, Color(0xFF3B82F6), 'public_safety'),
-    _Category('Infrastructure', Icons.construction, Color(0xFF8B5CF6), 'infrastructure'),
-    _Category('Health Risk', Icons.local_hospital, Color(0xFF10B981), 'health_sanitation'),
-    _Category('Environment', Icons.eco, Color(0xFF22C55E), 'environmental_risks'),
-    _Category('Service Failure', Icons.business_center, Color(0xFF6B7280), 'service_delivery'),
+    _Category('Crime Signal', Icons.warning_amber, Color(0xFFEF4444),
+        'crime_signals'),
+    _Category(
+        'Public Safety', Icons.security, Color(0xFF3B82F6), 'public_safety'),
+    _Category('Infrastructure', Icons.construction, Color(0xFF8B5CF6),
+        'infrastructure'),
+    _Category('Health Risk', Icons.local_hospital, Color(0xFF10B981),
+        'health_sanitation'),
+    _Category(
+        'Environment', Icons.eco, Color(0xFF22C55E), 'environmental_risks'),
+    _Category('Service Failure', Icons.business_center, Color(0xFF6B7280),
+        'service_delivery'),
     _Category('Terrorism', Icons.dangerous, Color(0xFFDC2626), 'terrorism'),
   ];
 
@@ -41,7 +47,7 @@ class HomeScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Hero banner
+              // ── Hero banner ─────────────────────────────────────────────
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
@@ -74,17 +80,48 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () => Navigator.pushNamed(context, '/submit'),
-                      icon: const Icon(Icons.add_circle_outline, size: 18),
-                      label: const Text('New Report'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1A73E8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () =>
+                                Navigator.pushNamed(context, '/submit'),
+                            icon:
+                                const Icon(Icons.add_circle_outline, size: 16),
+                            label: const Text('New Report',
+                                style: TextStyle(fontSize: 13)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: const Color(0xFF1A73E8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () =>
+                                Navigator.pushNamed(context, '/track'),
+                            icon: const Icon(Icons.track_changes, size: 16),
+                            label: const Text('Track Report',
+                                style: TextStyle(fontSize: 13)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: BorderSide(
+                                  color: Colors.white.withOpacity(0.6)),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -92,7 +129,7 @@ class HomeScreen extends StatelessWidget {
 
               const SizedBox(height: 28),
 
-              // Quick category select
+              // ── Category grid ───────────────────────────────────────────
               const Text(
                 'What are you reporting?',
                 style: TextStyle(
@@ -116,11 +153,80 @@ class HomeScreen extends StatelessWidget {
                     .toList(),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
 
-              // Privacy badge
+              // ── Track report card ───────────────────────────────────────
+              GestureDetector(
+                onTap: () => Navigator.pushNamed(context, '/track'),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: const Color(0xFF1A73E8).withOpacity(0.2)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1A73E8).withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.manage_search,
+                          color: Color(0xFF1A73E8),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Check Report Status',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Enter your tracking code to see updates and messages from analysts',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF64748B),
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios,
+                          size: 14, color: Color(0xFF94A3B8)),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Privacy badge ───────────────────────────────────────────
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.green.shade50,
                   borderRadius: BorderRadius.circular(12),
@@ -143,6 +249,8 @@ class HomeScreen extends StatelessWidget {
                   ],
                 ),
               ),
+
+              const SizedBox(height: 8),
             ],
           ),
         ),
@@ -166,11 +274,8 @@ class _CategoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.pushNamed(
-        context,
-        '/submit',
-        arguments: category.key,
-      ),
+      onTap: () =>
+          Navigator.pushNamed(context, '/submit', arguments: category.key),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,

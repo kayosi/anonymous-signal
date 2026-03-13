@@ -114,6 +114,19 @@ interface PaginatedReports {
   total_pages: number;
 }
 
+interface ReportMessage {
+  id: string;
+  sender: 'analyst' | 'reporter';
+  message: string;
+  created_at: string;
+}
+
+interface ReportDetail {
+  text_content?: string;
+  messages: ReportMessage[];
+  unread_from_reporter: number;
+}
+
 interface IntelligenceSummary {
   window_hours: number;
   total_reports_in_window: number;
@@ -271,16 +284,20 @@ export default function Dashboard() {
   const [reportsStatusFilter, setReportsStatusFilter] = useState('');
   const [reportsUrgencyFilter, setReportsUrgencyFilter] = useState('');
   const [reportsLoading, setReportsLoading] = useState(false);
+  const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const [reportDetails, setReportDetails] = useState<Record<string, ReportDetail>>({});
+  const [reportChatInput, setReportChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([{
+  const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([{
     role: 'assistant',
     content: "👋 I'm your intelligence analyst assistant. Ask me about report trends, categories, urgency levels, or emerging patterns.\n\nTry: **\"Show me today's surges\"** or **\"Which categories are most urgent?\"**",
     timestamp: new Date(),
   }]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [aiChatInput, setAiChatInput] = useState('');
+  const [aiChatLoading, setAiChatLoading] = useState(false);
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -341,6 +358,61 @@ export default function Dashboard() {
     }
   }, [token]);
 
+  const fetchReportDetail = async (reportId: string) => {
+    if (!token || reportDetails[reportId]) return;
+    try {
+      const [detailRes, msgRes] = await Promise.all([
+        api.get(`/reports/${reportId}`),
+        api.get(`/reports/${reportId}/messages`),
+      ]);
+      const detail = detailRes.data;
+      let textContent = '';
+      try {
+        // Try to decrypt/parse content from detail
+        textContent = detail.decrypted_text || detail.text_content || '';
+      } catch { textContent = ''; }
+      setReportDetails(prev => ({
+        ...prev,
+        [reportId]: {
+          text_content: textContent,
+          messages: msgRes.data || [],
+          unread_from_reporter: (msgRes.data || []).filter((m: ReportMessage) => m.sender === 'reporter').length,
+        }
+      }));
+    } catch (err) {
+      console.error('Report detail fetch failed:', err);
+    }
+  };
+
+  const sendAnalystMessage = async (reportId: string) => {
+    if (!token || !reportChatInput.trim()) return;
+    setChatSending(true);
+    try {
+      const res = await api.post(`/reports/${reportId}/messages`, { message: reportChatInput.trim() });
+      setReportChatInput('');
+      setReportDetails(prev => ({
+        ...prev,
+        [reportId]: {
+          ...prev[reportId],
+          messages: [...(prev[reportId]?.messages || []), res.data],
+        }
+      }));
+    } catch (err) {
+      console.error('Send message failed:', err);
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const toggleReport = async (reportId: string) => {
+    if (expandedReport === reportId) {
+      setExpandedReport(null);
+    } else {
+      setExpandedReport(reportId);
+      await fetchReportDetail(reportId);
+    }
+  };
+
   const fetchIntelligence = useCallback(async () => {
     if (!token || role === 'analyst') return;
     try {
@@ -366,21 +438,21 @@ export default function Dashboard() {
     }
   }, [activeTab, reportsPage, reportsStatusFilter, reportsUrgencyFilter, fetchReports, token]);
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [aiChatMessages]);
 
   const sendChat = async () => {
-    const q = chatInput.trim();
-    if (!q || chatLoading) return;
-    setChatMessages((p) => [...p, { role: 'user', content: q, timestamp: new Date() }]);
-    setChatInput('');
-    setChatLoading(true);
+    const q = aiChatInput.trim();
+    if (!q || aiChatLoading) return;
+    setAiChatMessages((p) => [...p, { role: 'user', content: q, timestamp: new Date() }]);
+    setAiChatInput('');
+    setAiChatLoading(true);
     try {
       const res = await api.post('/analytics/chatbot', { query: q });
-      setChatMessages((p) => [...p, { role: 'assistant', content: res.data.answer, timestamp: new Date() }]);
+      setAiChatMessages((p) => [...p, { role: 'assistant', content: res.data.answer, timestamp: new Date() }]);
     } catch {
-      setChatMessages((p) => [...p, { role: 'assistant', content: '⚠️ Unable to process your query. Please try again.', timestamp: new Date() }]);
+      setAiChatMessages((p) => [...p, { role: 'assistant', content: '⚠️ Unable to process your query. Please try again.', timestamp: new Date() }]);
     } finally {
-      setChatLoading(false);
+      setAiChatLoading(false);
     }
   };
 
@@ -689,9 +761,17 @@ export default function Dashboard() {
             ) : (
               <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {reports.items.map((report) => (
-                    <div key={report.id} style={{ ...card, padding: '1rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                  {reports.items.map((report) => {
+                    const isExpanded = expandedReport === report.id;
+                    const detail = reportDetails[report.id];
+                    const unreadCount = detail?.messages?.filter(m => m.sender === 'reporter' && !detail).length || 0;
+                    return (
+                    <div key={report.id} style={{ ...card, padding: '1rem', border: isExpanded ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.05)' }}>
+                      {/* ── Report Header Row ── */}
+                      <div
+                        onClick={() => toggleReport(report.id)}
+                        style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', cursor: 'pointer' }}
+                      >
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
                             <StatusBadge status={report.status} />
@@ -699,6 +779,7 @@ export default function Dashboard() {
                             {report.category && <CategoryBadge category={report.category} />}
                             {report.has_audio && <span style={{ fontSize: '0.7rem', color: '#60a5fa', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', padding: '0.1rem 0.4rem', borderRadius: '6px' }}>🎤 audio</span>}
                             {report.has_image && <span style={{ fontSize: '0.7rem', color: '#a78bfa', background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)', padding: '0.1rem 0.4rem', borderRadius: '6px' }}>📷 image</span>}
+                            {detail?.messages?.length > 0 && <span style={{ fontSize: '0.7rem', color: '#34d399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)', padding: '0.1rem 0.4rem', borderRadius: '6px' }}>💬 {detail.messages.length}</span>}
                           </div>
                           {report.user_category && (
                             <p style={{ margin: '0 0 0.4rem', fontSize: '0.875rem', color: '#94a3b8' }}>
@@ -710,17 +791,80 @@ export default function Dashboard() {
                             <span style={{ fontFamily: 'monospace' }}>ID: {report.id.slice(0, 8)}…</span>
                           </div>
                         </div>
-                        {report.severity_score != null && (
-                          <div style={{ textAlign: 'center', minWidth: 56 }}>
-                            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: report.severity_score >= 70 ? '#f87171' : report.severity_score >= 40 ? '#fbbf24' : '#4ade80' }}>
-                              {report.severity_score}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          {report.severity_score != null && (
+                            <div style={{ textAlign: 'center', minWidth: 56 }}>
+                              <div style={{ fontSize: '1.25rem', fontWeight: 700, color: report.severity_score >= 70 ? '#f87171' : report.severity_score >= 40 ? '#fbbf24' : '#4ade80' }}>
+                                {report.severity_score}
+                              </div>
+                              <div style={{ fontSize: '0.65rem', color: '#64748b' }}>severity</div>
                             </div>
-                            <div style={{ fontSize: '0.65rem', color: '#64748b' }}>severity</div>
-                          </div>
-                        )}
+                          )}
+                          <ChevronRight style={{ width: 16, height: 16, color: '#64748b', transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+                        </div>
                       </div>
+
+                      {/* ── Expanded Panel ── */}
+                      {isExpanded && (
+                        <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                          {/* Report Content */}
+                          {detail?.text_content ? (
+                            <div style={{ background: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '0.75rem', fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
+                              {detail.text_content}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic' }}>Loading report content...</div>
+                          )}
+
+                          {/* Chat Section */}
+                          <div>
+                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Anonymous Chat
+                            </div>
+                            <div style={{ background: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: 280, overflowY: 'auto' }}>
+                              {(!detail?.messages || detail.messages.length === 0) && (
+                                <p style={{ fontSize: '0.8rem', color: '#475569', textAlign: 'center', margin: '0.5rem 0' }}>No messages yet. Start a conversation with the reporter.</p>
+                              )}
+                              {detail?.messages?.map((msg) => (
+                                <div key={msg.id} style={{ display: 'flex', flexDirection: msg.sender === 'analyst' ? 'row-reverse' : 'row', gap: '0.5rem', alignItems: 'flex-end' }}>
+                                  <div style={{
+                                    maxWidth: '75%',
+                                    background: msg.sender === 'analyst' ? 'rgba(59,130,246,0.15)' : 'rgba(51,65,85,0.8)',
+                                    border: msg.sender === 'analyst' ? '1px solid rgba(59,130,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                                    borderRadius: msg.sender === 'analyst' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                                    padding: '0.5rem 0.75rem',
+                                  }}>
+                                    <div style={{ fontSize: '0.8rem', color: msg.sender === 'analyst' ? '#93c5fd' : '#cbd5e1' }}>{msg.message}</div>
+                                    <div style={{ fontSize: '0.65rem', color: '#475569', marginTop: '0.2rem', textAlign: msg.sender === 'analyst' ? 'right' : 'left' }}>
+                                      {msg.sender === 'analyst' ? '🔵 You' : '⚪ Reporter'} · {new Date(msg.created_at).toLocaleTimeString()}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Message Input */}
+                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                              <input
+                                value={reportChatInput}
+                                onChange={(e) => setReportChatInput(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAnalystMessage(report.id); } }}
+                                placeholder="Type a message to the anonymous reporter..."
+                                style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', color: '#e2e8f0', borderRadius: '8px', padding: '0.5rem 0.75rem', fontSize: '0.8rem', outline: 'none' }}
+                              />
+                              <button
+                                onClick={() => sendAnalystMessage(report.id)}
+                                disabled={chatSending || !reportChatInput.trim()}
+                                style={{ background: chatSending || !reportChatInput.trim() ? '#334155' : '#3b82f6', border: 'none', color: '#fff', borderRadius: '8px', padding: '0.5rem 1rem', cursor: chatSending || !reportChatInput.trim() ? 'not-allowed' : 'pointer', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                              >
+                                {chatSending ? '...' : 'Send'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Pagination */}
@@ -798,7 +942,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingBottom: '0.5rem' }}>
-              {chatMessages.map((msg, i) => (
+              {aiChatMessages.map((msg, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div
                     style={{ maxWidth: '80%', borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px', padding: '0.75rem 1rem', fontSize: '0.875rem', background: msg.role === 'user' ? '#2563eb' : '#1e293b', border: msg.role === 'user' ? 'none' : '1px solid #334155', color: '#e2e8f0' }}
@@ -806,7 +950,7 @@ export default function Dashboard() {
                   />
                 </div>
               ))}
-              {chatLoading && (
+              {aiChatLoading && (
                 <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                   <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '16px 16px 16px 4px', padding: '0.75rem 1rem', display: 'flex', gap: '0.25rem' }}>
                     {[0, 150, 300].map((d) => <div key={d} style={{ width: 8, height: 8, background: '#64748b', borderRadius: '50%', animation: `bounce 1s ${d}ms infinite` }} />)}
@@ -817,18 +961,18 @@ export default function Dashboard() {
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.5rem', marginBottom: '0.5rem' }}>
               {["Show today's surges", "Critical alerts", "Top risk categories", "Active clusters", "Urgency breakdown"].map((p) => (
-                <button key={p} onClick={() => setChatInput(p)} style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '0.375rem 0.75rem', borderRadius: '10px', cursor: 'pointer', whiteSpace: 'nowrap' }}>{p}</button>
+                <button key={p} onClick={() => setAiChatInput(p)} style={{ fontSize: '0.75rem', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', padding: '0.375rem 0.75rem', borderRadius: '10px', cursor: 'pointer', whiteSpace: 'nowrap' }}>{p}</button>
               ))}
             </div>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <input
-                type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                type="text" value={aiChatInput} onChange={(e) => setAiChatInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendChat()}
                 placeholder="Ask about trends, risks, patterns…"
-                disabled={chatLoading}
+                disabled={aiChatLoading}
                 style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '0.75rem 1rem', color: 'white', outline: 'none', fontSize: '0.875rem' }}
               />
-              <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()} style={{ background: '#2563eb', border: 'none', borderRadius: '12px', padding: '0.75rem 1rem', color: 'white', cursor: 'pointer', opacity: chatLoading || !chatInput.trim() ? 0.4 : 1 }}>
+              <button onClick={sendChat} disabled={aiChatLoading || !aiChatInput.trim()} style={{ background: '#2563eb', border: 'none', borderRadius: '12px', padding: '0.75rem 1rem', color: 'white', cursor: 'pointer', opacity: aiChatLoading || !aiChatInput.trim() ? 0.4 : 1 }}>
                 <Send style={{ width: 16, height: 16 }} />
               </button>
             </div>

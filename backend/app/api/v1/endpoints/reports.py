@@ -23,14 +23,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.models.models import Report, ReportAIAnalysis
+from app.models.models import Report, ReportAIAnalysis, ReportMessage
 from app.schemas.schemas import (
     ReportSubmitRequest,
-    ReportSubmitResponse,
     ReportDetailResponse,
     ReportListItem,
     PaginatedReports,
     AIAnalysisResponse,
+    ReportSubmitResponse,
+    ReportTrackResponse,
+    ReportMessageOut,
+    SendMessageRequest,
+    AnalystSendMessageRequest,
 )
 from app.security.encryption import encryption_service, FileEncryptionService
 from app.core.config import settings
@@ -161,6 +165,15 @@ async def submit_report(
     encrypted_content = encryption_service.encrypt(content_payload)
 
     # ── Save to Database ───────────────────────────────────────────────────
+    # ── Generate anonymous tracking code ─────────────────────────────────
+    import secrets, string
+    from passlib.hash import bcrypt as pw_bcrypt
+    alphabet = string.ascii_uppercase + string.digits
+    part1 = "".join(secrets.choice(alphabet) for _ in range(4))
+    part2 = "".join(secrets.choice(alphabet) for _ in range(4))
+    tracking_code = f"KE-{part1}-{part2}"
+    tracking_code_hash = pw_bcrypt.hash(tracking_code)
+
     report = Report(
         id=report_id,
         encrypted_content=encrypted_content,
@@ -170,6 +183,7 @@ async def submit_report(
         image_ref=image_ref,
         user_category=request_data.user_category,
         status="pending",
+        tracking_code_hash=tracking_code_hash,
     )
 
     db.add(report)
@@ -184,7 +198,8 @@ async def submit_report(
     return ReportSubmitResponse(
         report_id=report_id,
         status="received",
-        message="Your report has been received anonymously. Thank you for helping keep your community safe.",
+        message="Your report has been received anonymously. Save your tracking code to check status and receive messages from analysts.",
+        tracking_code=tracking_code,
     )
 
 
@@ -225,73 +240,63 @@ async def list_reports(
     page_size = min(page_size, 100)
     offset = (page - 1) * page_size
 
-    import math
-
-    # Step 1: fetch reports (no correlated subquery)
-    report_query = (
-        select(Report)
-        .where(Report.is_archived == False)
-        .order_by(desc(Report.submitted_at))
-    )
-    if status_filter:
-        report_query = report_query.where(Report.status == status_filter)
-
-    count_query = select(func.count(Report.id)).where(Report.is_archived == False)
-    if status_filter:
-        count_query = count_query.where(Report.status == status_filter)
-    total = await db.scalar(count_query) or 0
-
-    result = await db.execute(report_query.offset(offset).limit(page_size))
-    reports_page = result.scalars().all()
-
-    if not reports_page:
-        return PaginatedReports(
-            items=[],
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=max(1, math.ceil(total / page_size)) if total > 0 else 1,
-        )
-
-    # Step 2: fetch latest analysis per report using DISTINCT ON
-    report_ids = [r.id for r in reports_page]
+    # Step 1: get latest analysis id per report using DISTINCT ON (avoids SQLAlchemy auto-correlation bug)
     from sqlalchemy import text
-    analysis_sql = text("""
-        SELECT DISTINCT ON (report_id)
-            id, report_id, category, urgency_level, severity_score, analyzed_at
-        FROM report_ai_analysis
-        WHERE report_id = ANY(:ids)
-        ORDER BY report_id, analyzed_at DESC
-    """)
-    analysis_result = await db.execute(analysis_sql, {"ids": report_ids})
-    analyses_by_report = {row.report_id: row for row in analysis_result}
+    latest_analysis_ids_result = await db.execute(
+        text("""
+            SELECT DISTINCT ON (report_id) id, report_id, urgency_level, severity_score, category
+            FROM report_ai_analysis
+            ORDER BY report_id, analyzed_at DESC
+        """)
+    )
+    latest_by_report = {row.report_id: row for row in latest_analysis_ids_result}
 
-    # Step 3: build response
+    # Step 2: fetch reports with filters
+    base_conditions = [Report.is_archived == False]
+    if status_filter:
+        base_conditions.append(Report.status == status_filter)
+    if category_filter:
+        base_conditions.append(Report.user_category == category_filter)
+
+    query = (
+        select(Report)
+        .where(*base_conditions)
+        .order_by(desc(Report.submitted_at))
+        .offset(offset)
+        .limit(page_size)
+    )
+
+    result = await db.execute(query)
+    reports = result.scalars().all()
+
+    # Build rows as (report, analysis_row_or_None)
+    rows = [(r, latest_by_report.get(r.id)) for r in reports]
+
+    # Count query
+    count_query = select(func.count(Report.id)).where(*base_conditions)
+    total = await db.scalar(count_query)
+
     items = []
-    for report in reports_page:
-        analysis = analyses_by_report.get(report.id)
-        if urgency_filter and (not analysis or analysis.urgency_level != urgency_filter):
+    for report, analysis in rows:
+        urgency = analysis.urgency_level if analysis else None
+        if urgency_filter and urgency != urgency_filter:
             continue
-        if category_filter and (not analysis or analysis.category != category_filter):
-            continue
-        items.append(ReportListItem(
+        item = ReportListItem(
             id=report.id,
             status=report.status,
             user_category=report.user_category,
             submitted_at=report.submitted_at,
-            urgency_level=analysis.urgency_level if analysis else None,
+            urgency_level=urgency,
             severity_score=analysis.severity_score if analysis else None,
             category=analysis.category if analysis else None,
-            has_audio=report.has_audio or False,
-            has_image=report.has_image or False,
-        ))
+        )
+        items.append(item)
 
     return PaginatedReports(
         items=items,
-        total=total,
+        total=total or 0,
         page=page,
         page_size=page_size,
-        total_pages=max(1, math.ceil(total / page_size)) if total > 0 else 1,
     )
 
 
@@ -356,4 +361,216 @@ async def get_report(
         has_image=report.has_image,
         decrypted_text=decrypted_text,
         ai_analyses=analyses,
+    )
+
+
+# ─── Reporter Tracking Endpoints (No Auth — Code Only) ─────────────────────
+
+@router.post(
+    "/track",
+    response_model=ReportTrackResponse,
+    summary="Track report status using anonymous code",
+)
+async def track_report(
+    tracking_code: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reporter uses their one-time code to check report status and read analyst messages.
+    No authentication required — the code IS the identity.
+    """
+    from passlib.hash import bcrypt as pw_bcrypt
+    from sqlalchemy import text as sql_text
+
+    # Find report by trying bcrypt verify against all hashed codes
+    # For performance we use a partial index — only check non-null codes
+    result = await db.execute(
+        select(Report)
+        .where(Report.tracking_code_hash.isnot(None))
+        .where(Report.is_archived == False)
+    )
+    reports = result.scalars().all()
+
+    matched_report = None
+    for r in reports:
+        try:
+            if pw_bcrypt.verify(tracking_code, r.tracking_code_hash):
+                matched_report = r
+                break
+        except Exception:
+            continue
+
+    if not matched_report:
+        raise HTTPException(status_code=404, detail="Tracking code not found")
+
+    # Fetch latest AI analysis
+    analysis_result = await db.execute(
+        select(ReportAIAnalysis)
+        .where(ReportAIAnalysis.report_id == matched_report.id)
+        .order_by(desc(ReportAIAnalysis.analyzed_at))
+        .limit(1)
+    )
+    analysis = analysis_result.scalar_one_or_none()
+
+    # Fetch messages
+    msg_result = await db.execute(
+        select(ReportMessage)
+        .where(ReportMessage.report_id == matched_report.id)
+        .order_by(ReportMessage.created_at)
+    )
+    messages = msg_result.scalars().all()
+
+    # Mark analyst messages as read by reporter
+    unread_count = sum(1 for m in messages if m.sender == "analyst" and not m.read_by_reporter)
+    if unread_count > 0:
+        from sqlalchemy import update as sql_update
+        await db.execute(
+            sql_update(ReportMessage)
+            .where(ReportMessage.report_id == matched_report.id)
+            .where(ReportMessage.sender == "analyst")
+            .values(read_by_reporter=True)
+        )
+        await db.commit()
+
+    return ReportTrackResponse(
+        report_id=matched_report.id,
+        status=matched_report.status,
+        user_category=matched_report.user_category,
+        submitted_at=matched_report.submitted_at,
+        urgency_level=analysis.urgency_level if analysis else None,
+        category=analysis.category if analysis else None,
+        messages=[ReportMessageOut(
+            id=m.id,
+            sender=m.sender,
+            message=m.message,
+            created_at=m.created_at,
+        ) for m in messages],
+        unread_from_analyst=unread_count,
+    )
+
+
+@router.post(
+    "/track/message",
+    summary="Reporter sends message using tracking code",
+    status_code=status.HTTP_201_CREATED,
+)
+async def reporter_send_message(
+    tracking_code: str = Form(...),
+    message: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reporter replies to analyst using their tracking code."""
+    from passlib.hash import bcrypt as pw_bcrypt
+
+    if not message or len(message.strip()) < 1:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
+    if len(message) > 2000:
+        raise HTTPException(status_code=422, detail="Message too long (max 2000 chars)")
+
+    result = await db.execute(
+        select(Report)
+        .where(Report.tracking_code_hash.isnot(None))
+        .where(Report.is_archived == False)
+    )
+    reports = result.scalars().all()
+
+    matched_report = None
+    for r in reports:
+        try:
+            if pw_bcrypt.verify(tracking_code, r.tracking_code_hash):
+                matched_report = r
+                break
+        except Exception:
+            continue
+
+    if not matched_report:
+        raise HTTPException(status_code=404, detail="Tracking code not found")
+
+    msg = ReportMessage(
+        report_id=matched_report.id,
+        sender="reporter",
+        message=message.strip(),
+        read_by_analyst=False,
+        read_by_reporter=True,
+    )
+    db.add(msg)
+    await db.commit()
+
+    return {"status": "sent", "message": "Your message has been sent to the analyst."}
+
+
+# ─── Analyst Chat Endpoints (Require Auth) ─────────────────────────────────
+
+@router.get(
+    "/{report_id}/messages",
+    response_model=list[ReportMessageOut],
+    summary="Get messages for a report (analyst only)",
+    dependencies=[Depends(get_current_analyst)],
+)
+async def get_report_messages(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyst reads all messages for a report."""
+    result = await db.execute(
+        select(ReportMessage)
+        .where(ReportMessage.report_id == report_id)
+        .order_by(ReportMessage.created_at)
+    )
+    messages = result.scalars().all()
+
+    # Mark reporter messages as read by analyst
+    from sqlalchemy import update as sql_update
+    await db.execute(
+        sql_update(ReportMessage)
+        .where(ReportMessage.report_id == report_id)
+        .where(ReportMessage.sender == "reporter")
+        .values(read_by_analyst=True)
+    )
+    await db.commit()
+
+    return [ReportMessageOut(
+        id=m.id,
+        sender=m.sender,
+        message=m.message,
+        created_at=m.created_at,
+    ) for m in messages]
+
+
+@router.post(
+    "/{report_id}/messages",
+    response_model=ReportMessageOut,
+    summary="Analyst sends message to reporter",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_analyst)],
+)
+async def analyst_send_message(
+    report_id: uuid.UUID,
+    body: AnalystSendMessageRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyst initiates or replies in the chat for a report."""
+    # Verify report exists
+    report = await db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    msg = ReportMessage(
+        report_id=report_id,
+        sender="analyst",
+        message=body.message.strip(),
+        read_by_analyst=True,
+        read_by_reporter=False,
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+
+    logger.info("analyst_message_sent", report_id=str(report_id)[:8])
+
+    return ReportMessageOut(
+        id=msg.id,
+        sender=msg.sender,
+        message=msg.message,
+        created_at=msg.created_at,
     )

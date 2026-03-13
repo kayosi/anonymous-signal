@@ -131,6 +131,22 @@ CREATE TABLE IF NOT EXISTS analyst_users (
     last_login      TIMESTAMP WITH TIME ZONE
 );
 
+-- ─── Reporter Tracking Code ──────────────────────────────────────────────
+-- Add tracking code hash to reports (migration-safe)
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS tracking_code_hash TEXT;
+
+-- ─── Report Messages ──────────────────────────────────────────────────────
+-- Anonymous chat between analysts and reporters via tracking code
+CREATE TABLE IF NOT EXISTS report_messages (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_id       UUID NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    sender          VARCHAR(16) NOT NULL CHECK (sender IN ('analyst', 'reporter')),
+    message         TEXT NOT NULL,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    read_by_analyst BOOLEAN DEFAULT FALSE,
+    read_by_reporter BOOLEAN DEFAULT FALSE
+);
+
 -- ─── Indexes ──────────────────────────────────────────────────────────────
 CREATE INDEX idx_reports_status ON reports(status);
 CREATE INDEX idx_reports_submitted_at ON reports(submitted_at DESC);
@@ -142,6 +158,9 @@ CREATE INDEX idx_analysis_severity ON report_ai_analysis(severity_score DESC);
 CREATE INDEX idx_clusters_category ON clusters(category);
 CREATE INDEX idx_alerts_created_at ON alerts(created_at DESC);
 CREATE INDEX idx_alerts_acknowledged ON alerts(acknowledged);
+CREATE INDEX idx_messages_report_id ON report_messages(report_id);
+CREATE INDEX idx_messages_created_at ON report_messages(created_at DESC);
+CREATE INDEX idx_reports_tracking_code ON reports(tracking_code_hash) WHERE tracking_code_hash IS NOT NULL;
 
 -- ─── Seed default admin ───────────────────────────────────────────────────
 -- Password: 'AdminPassword123!' — MUST be changed after first login

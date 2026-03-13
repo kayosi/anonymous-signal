@@ -107,13 +107,11 @@ class ReportListItem(BaseModel):
     """Lightweight report item for list view."""
     id: uuid.UUID
     status: str
-    user_category: Optional[str] = None
+    user_category: Optional[str]
     submitted_at: datetime
     urgency_level: Optional[str] = None
     severity_score: Optional[int] = None
     category: Optional[str] = None
-    has_audio: bool = False
-    has_image: bool = False
 
     class Config:
         from_attributes = True
@@ -124,7 +122,6 @@ class PaginatedReports(BaseModel):
     total: int
     page: int
     page_size: int
-    total_pages: int = 1
 
 
 # ─── Cluster Schemas ───────────────────────────────────────────────────────
@@ -227,3 +224,43 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
+
+
+# ─── Tracking Code / Reporter Chat Schemas ───────────────────────────────────
+
+class ReportSubmitResponse(BaseModel):
+    """Returned once on submission — tracking_code shown only here, never again."""
+    report_id: uuid.UUID
+    status: str
+    message: str
+    tracking_code: str  # e.g. KE-7X4M-2R9P — shown once, not stored in plain text
+
+
+class ReportMessageOut(BaseModel):
+    id: uuid.UUID
+    sender: str  # 'analyst' or 'reporter'
+    message: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ReportTrackResponse(BaseModel):
+    """Reporter view of their report status via tracking code."""
+    report_id: uuid.UUID
+    status: str
+    user_category: Optional[str] = None
+    submitted_at: datetime
+    urgency_level: Optional[str] = None
+    category: Optional[str] = None
+    messages: List[ReportMessageOut] = []
+    unread_from_analyst: int = 0
+
+
+class SendMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class AnalystSendMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
