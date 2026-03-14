@@ -59,6 +59,14 @@ class Report(Base):
     # Anonymous tracking code (bcrypt hashed) — given to reporter once on submission
     tracking_code_hash = Column(Text, nullable=True)
 
+    # Spam / credibility detection fields
+    spam_reason = Column(Text, nullable=True)           # Human-readable reason flagged as spam
+    credibility_score = Column(Float, nullable=True)    # 0.0-1.0 score from false_report_detector
+    credibility_flags = Column(Text, nullable=True)     # JSON array of flag strings
+    duplicate_of = Column(Text, nullable=True)          # Report ID this is a near-duplicate of
+    spam_flagged_at = Column(DateTime(timezone=True), nullable=True)  # When it was spam-flagged
+    spam_deleted_at = Column(DateTime(timezone=True), nullable=True)  # Scheduled auto-delete date
+
     # Relationships
     ai_analyses = relationship("ReportAIAnalysis", back_populates="report", cascade="all, delete-orphan")
     messages = relationship("ReportMessage", back_populates="report", cascade="all, delete-orphan", order_by="ReportMessage.created_at")

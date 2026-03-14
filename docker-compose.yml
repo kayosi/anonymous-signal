@@ -46,10 +46,10 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-anon_user}:${POSTGRES_PASSWORD:-changeme_in_prod}@postgres:5432/${POSTGRES_DB:-anon_signal}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_changeme}@redis:6379/0
       - AI_SERVICE_URL=http://ai-service:8001
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-generate_32_byte_key_in_prod}
-      - JWT_SECRET=${JWT_SECRET:-generate_secret_in_prod}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - JWT_SECRET=${JWT_SECRET}
       - ENVIRONMENT=${ENVIRONMENT:-production}
-      - CORS_ORIGINS_STR=http://localhost:3000,http://localhost:80
+      - CORS_ORIGINS_STR=http://localhost,http://localhost:3000,http://127.0.0.1,http://127.0.0.1:3000
       - MAX_AUDIO_SIZE_MB=${MAX_AUDIO_SIZE_MB:-10}
       - MAX_IMAGE_SIZE_MB=${MAX_IMAGE_SIZE_MB:-5}
       - SCHEDULER_INTERVAL_SECONDS=${SCHEDULER_INTERVAL_SECONDS:-300}
@@ -79,7 +79,7 @@ services:
     container_name: anon_signal_ai
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-anon_user}:${POSTGRES_PASSWORD:-changeme_in_prod}@postgres:5432/${POSTGRES_DB:-anon_signal}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-generate_32_byte_key_in_prod}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - WHISPER_MODEL=${WHISPER_MODEL:-base}
       - CLASSIFICATION_MODEL=${CLASSIFICATION_MODEL:-facebook/bart-large-mnli}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
@@ -106,7 +106,9 @@ services:
 
   # ─── Next.js Dashboard ────────────────────────────────────────────────────
   dashboard:
-    image: anonymous-signal-dashboard:latest
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
     container_name: anon_signal_dashboard
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost/api/v1
@@ -129,7 +131,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - nginx_ssl:/etc/nginx/ssl:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
       - certbot_www:/var/www/certbot:ro
     depends_on:
       - backend
@@ -146,8 +148,6 @@ volumes:
   encrypted_uploads:
     driver: local
   ai_model_cache:
-    driver: local
-  nginx_ssl:
     driver: local
   certbot_www:
     driver: local

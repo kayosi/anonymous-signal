@@ -17,6 +17,7 @@ from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 
 from classifier import get_classifier
+from false_report_detector import assess_credibility
 from clustering import get_clustering_service, get_embedding_service
 from scoring import get_scorer
 from transcription import get_transcription_service
@@ -133,6 +134,45 @@ async def _run_ai_pipeline(report_id: str):
             else:
                 combined_text = "No content available"
 
+            # 4b. Credibility check (Phase 1 + Phase 2)
+            credibility = await assess_credibility(
+                text=combined_text,
+                report_id=report_id,
+                category=row['user_category'] or 'other',
+                pool=pool,
+            )
+            if credibility.should_reject:
+                import json as _json
+                from datetime import datetime, timedelta, timezone
+                _now = datetime.now(timezone.utc)
+                _auto_delete = _now + timedelta(days=30)
+                await conn.execute(
+                    """UPDATE reports SET
+                        status = 'flagged',
+                        processed_at = NOW(),
+                        spam_reason = $2,
+                        credibility_score = $3,
+                        credibility_flags = $4,
+                        duplicate_of = $5,
+                        spam_flagged_at = $6,
+                        spam_deleted_at = $7
+                    WHERE id = $1""",
+                    report_id,
+                    credibility.rejection_reason or "Failed automated credibility check",
+                    credibility.credibility_score,
+                    _json.dumps(credibility.flags),
+                    credibility.duplicate_of,
+                    _now,
+                    _auto_delete,
+                )
+                logger.warning(
+                    'report_rejected_credibility',
+                    report_id=report_id[:8],
+                    reason=credibility.rejection_reason,
+                    flags=credibility.flags,
+                )
+                return
+
             # 5. Classify
             classification = await classifier.classify(combined_text)
             category = classification["category"]
@@ -195,6 +235,14 @@ async def _run_ai_pipeline(report_id: str):
                 transcription or None,
                 transcription_confidence or None,
                 ai_summary,
+            )
+            # Log credibility assessment
+            logger.info(
+                "credibility_assessment",
+                report_id=report_id[:8],
+                score=credibility.credibility_score,
+                flags=credibility.flags,
+                is_duplicate=credibility.is_duplicate,
             )
 
             await conn.execute(

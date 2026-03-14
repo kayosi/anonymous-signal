@@ -574,3 +574,128 @@ async def analyst_send_message(
         message=msg.message,
         created_at=msg.created_at,
     )
+
+
+# ─── Spam Box Endpoints ────────────────────────────────────────────────────────
+
+from datetime import datetime, timedelta, timezone
+
+@router.get(
+    "/spam",
+    summary="List spam/flagged reports (analyst only)",
+    dependencies=[Depends(get_current_analyst)],
+)
+async def list_spam_reports(
+    page: int = 1,
+    page_size: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return reports flagged as spam/low-credibility, sorted by flagged date."""
+    offset = (page - 1) * page_size
+
+    total_result = await db.execute(
+        select(func.count(Report.id)).where(
+            Report.status == "flagged",
+            Report.is_archived == False,
+        )
+    )
+    total = total_result.scalar() or 0
+
+    result = await db.execute(
+        select(Report)
+        .where(Report.status == "flagged", Report.is_archived == False)
+        .order_by(desc(Report.spam_flagged_at))
+        .offset(offset)
+        .limit(page_size)
+    )
+    reports = result.scalars().all()
+
+    import json as _json
+    items = []
+    for r in reports:
+        auto_delete_in_days = None
+        if r.spam_deleted_at:
+            delta = r.spam_deleted_at - datetime.now(timezone.utc)
+            auto_delete_in_days = max(0, delta.days)
+
+        flags = []
+        if r.credibility_flags:
+            try:
+                flags = _json.loads(r.credibility_flags)
+            except Exception:
+                flags = [r.credibility_flags]
+
+        items.append({
+            "id": str(r.id),
+            "user_category": r.user_category,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "spam_flagged_at": r.spam_flagged_at.isoformat() if r.spam_flagged_at else None,
+            "spam_reason": r.spam_reason or "Flagged by automated credibility check",
+            "credibility_score": r.credibility_score,
+            "credibility_flags": flags,
+            "duplicate_of": r.duplicate_of,
+            "auto_delete_in_days": auto_delete_in_days,
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, (total + page_size - 1) // page_size),
+    }
+
+
+@router.post(
+    "/spam/{report_id}/restore",
+    summary="Restore spam report back to pending (analyst only)",
+    dependencies=[Depends(get_current_analyst)],
+)
+async def restore_spam_report(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Move a spam-flagged report back to pending for re-analysis."""
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_archived == False)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report.status != "flagged":
+        raise HTTPException(status_code=400, detail="Report is not in spam box")
+
+    report.status = "pending"
+    report.spam_reason = None
+    report.credibility_score = None
+    report.credibility_flags = None
+    report.duplicate_of = None
+    report.spam_flagged_at = None
+    report.spam_deleted_at = None
+    await db.commit()
+
+    logger.info("spam_report_restored", report_id=str(report_id)[:8])
+    return {"status": "restored", "report_id": str(report_id)}
+
+
+@router.delete(
+    "/spam/{report_id}",
+    summary="Permanently delete a spam report (analyst only)",
+    dependencies=[Depends(get_current_analyst)],
+)
+async def delete_spam_report(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently archive/delete a spam report."""
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.is_archived == False)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report.is_archived = True
+    await db.commit()
+
+    logger.info("spam_report_deleted", report_id=str(report_id)[:8])
+    return {"status": "deleted", "report_id": str(report_id)}

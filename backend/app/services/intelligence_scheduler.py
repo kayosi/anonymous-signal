@@ -52,6 +52,7 @@ async def run_intelligence_scheduler(database_url: str):
                 await _check_category_surges(db)
                 await _update_cluster_escalations(db)
                 await _retry_stuck_reports(db)
+                await _auto_delete_expired_spam(db)
                 await db.commit()
             logger.info("intelligence_scheduler_cycle_complete")
         except Exception as e:
@@ -224,3 +225,27 @@ async def _retry_stuck_reports(db):
                     await client.post(f"{ai_url}/process/{report_id}")
         except Exception as e:
             logger.error("retry_trigger_failed", error=str(e))
+
+async def _auto_delete_expired_spam(db):
+    """
+    Archive spam reports whose 30-day auto-delete window has passed.
+    Runs every scheduler cycle (~5 minutes).
+    """
+    from sqlalchemy import update
+    from app.models.models import Report
+
+    now = datetime.utcnow()
+    result = await db.execute(
+        update(Report)
+        .where(
+            Report.status == "flagged",
+            Report.is_archived == False,
+            Report.spam_deleted_at <= now,
+            Report.spam_deleted_at.isnot(None),
+        )
+        .values(is_archived=True)
+        .returning(Report.id)
+    )
+    deleted = result.fetchall()
+    if deleted:
+        logger.info("spam_auto_deleted", count=len(deleted))

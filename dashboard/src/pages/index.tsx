@@ -144,7 +144,19 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-type Tab = 'overview' | 'reports' | 'clusters' | 'alerts' | 'intelligence' | 'chat';
+interface SpamReport {
+  id: string;
+  submitted_at: string;
+  user_category: string | null;
+  credibility_score: number | null;
+  credibility_flags: string[];
+  spam_reason: string;
+  spam_flagged_at: string | null;
+  duplicate_of: string | null;
+  auto_delete_in_days: number | null;
+}
+
+type Tab = 'overview' | 'reports' | 'clusters' | 'alerts' | 'intelligence' | 'chat' | 'spam';
 type Role = 'analyst' | 'senior_analyst' | 'admin';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -284,6 +296,10 @@ export default function Dashboard() {
   const [reportsStatusFilter, setReportsStatusFilter] = useState('');
   const [reportsUrgencyFilter, setReportsUrgencyFilter] = useState('');
   const [reportsLoading, setReportsLoading] = useState(false);
+  const [spamReports, setSpamReports] = useState<SpamReport[]>([]);
+  const [spamTotal, setSpamTotal] = useState(0);
+  const [spamLoading, setSpamLoading] = useState(false);
+  const [spamPage, setSpamPage] = useState(1);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
   const [reportDetails, setReportDetails] = useState<Record<string, ReportDetail>>({});
   const [reportChatInput, setReportChatInput] = useState('');
@@ -358,11 +374,42 @@ export default function Dashboard() {
     }
   }, [token]);
 
+  const fetchSpam = useCallback(async (page = 1) => {
+    if (!token) return;
+    setSpamLoading(true);
+    try {
+      const res = await api.get(`/reports/spam?page=${page}&page_size=20`);
+      setSpamReports(res.data.items || []);
+      setSpamTotal(res.data.total || 0);
+    } catch (err) {
+      console.error('Spam fetch failed:', err);
+    } finally {
+      setSpamLoading(false);
+    }
+  }, [token]);
+
+  const restoreSpamReport = async (reportId: string) => {
+    try {
+      await api.post(`/reports/spam/${reportId}/restore`);
+      fetchSpam(spamPage);
+      setSpamTotal(t => Math.max(0, t - 1));
+    } catch (err) { console.error('Restore failed:', err); }
+  };
+
+  const deleteSpamReport = async (reportId: string) => {
+    if (!window.confirm('Permanently delete this report? This cannot be undone.')) return;
+    try {
+      await api.delete(`/reports/spam/${reportId}`);
+      fetchSpam(spamPage);
+      setSpamTotal(t => Math.max(0, t - 1));
+    } catch (err) { console.error('Delete failed:', err); }
+  };
+
   const fetchReportDetail = async (reportId: string) => {
-    if (!token || reportDetails[reportId]) return;
+    if (!token || reportDetails[reportId]?.text_content) return;
     try {
       const [detailRes, msgRes] = await Promise.all([
-        api.get(`/reports/${reportId}`),
+        api.get(`/reports/${reportId}?include_content=true`),
         api.get(`/reports/${reportId}/messages`),
       ]);
       const detail = detailRes.data;
@@ -431,6 +478,11 @@ export default function Dashboard() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [token, fetchAll, fetchIntelligence]);
 
+  // Fetch spam when tab opened
+  useEffect(() => {
+    if (activeTab === 'spam') fetchSpam(spamPage);
+  }, [activeTab, spamPage, fetchSpam]);
+
   // Fetch reports when tab is opened or filters change
   useEffect(() => {
     if (activeTab === 'reports' && token) {
@@ -496,6 +548,7 @@ export default function Dashboard() {
     { id: 'alerts',       label: 'Alerts',        icon: Bell,         badge: unacked.length },
     { id: 'clusters',     label: 'Clusters',      icon: Layers,       badge: clusters.filter(c => c.escalation_flag).length },
     { id: 'reports',      label: 'Reports',       icon: FileText },
+    { id: 'spam',         label: 'Spam',          icon: AlertTriangle, badge: spamTotal > 0 ? spamTotal : undefined },
     { id: 'intelligence', label: 'Intelligence',  icon: Zap },
     { id: 'chat',         label: 'AI Chat',       icon: MessageSquare },
   ];
@@ -877,6 +930,133 @@ export default function Dashboard() {
                     <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Page {reportsPage} of {reports.total_pages}</span>
                     <button onClick={() => setReportsPage((p) => Math.min(reports.total_pages, p + 1))} disabled={reportsPage === reports.total_pages}
                       style={{ background: '#334155', border: 'none', color: reportsPage === reports.total_pages ? '#475569' : '#cbd5e1', borderRadius: '8px', padding: '0.375rem 0.75rem', cursor: reportsPage === reports.total_pages ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center' }}>
+                      <ChevronRight style={{ width: 16, height: 16 }} />
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* SPAM BOX */}
+        {activeTab === 'spam' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <AlertTriangle style={{ width: 18, height: 18, color: '#f59e0b' }} /> Spam Box
+                </h2>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                  Reports flagged by automated credibility checks. Auto-deleted after 30 days.
+                </p>
+              </div>
+              <button onClick={() => fetchSpam(spamPage)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', background: '#334155', border: 'none', color: '#cbd5e1', fontSize: '0.8rem', padding: '0.375rem 0.75rem', borderRadius: '8px', cursor: 'pointer' }}>
+                <RefreshCw style={{ width: 12, height: 12 }} /> Refresh
+              </button>
+            </div>
+
+            {spamLoading ? (
+              <div style={{ textAlign: 'center', padding: '3rem' }}>
+                <div style={{ width: 32, height: 32, border: '4px solid #f59e0b', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 1rem' }} />
+                <p style={{ color: '#94a3b8', margin: 0 }}>Loading spam reports…</p>
+              </div>
+            ) : spamReports.length === 0 ? (
+              <div style={{ ...card, textAlign: 'center', padding: '3rem' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>✅</div>
+                <p style={{ color: '#4ade80', fontWeight: 600, margin: 0 }}>Spam box is empty</p>
+                <p style={{ color: '#64748b', fontSize: '0.8rem', margin: '0.5rem 0 0' }}>All reports passed automated credibility checks</p>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {spamReports.map((report) => (
+                    <div key={report.id} style={{ ...card, padding: '1rem', border: '1px solid rgba(245,158,11,0.2)', background: 'rgba(120,53,15,0.08)' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* Header row */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                            <span style={{ fontSize: '0.7rem', background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)', padding: '0.15rem 0.5rem', borderRadius: '6px', fontWeight: 600 }}>
+                              🚫 SPAM
+                            </span>
+                            {report.user_category && (
+                              <span style={{ fontSize: '0.7rem', color: '#94a3b8', background: 'rgba(51,65,85,0.8)', border: '1px solid #334155', padding: '0.15rem 0.5rem', borderRadius: '6px', textTransform: 'capitalize' }}>
+                                {report.user_category.replace(/_/g, ' ')}
+                              </span>
+                            )}
+                            {report.credibility_score != null && (
+                              <span style={{ fontSize: '0.7rem', color: report.credibility_score < 0.3 ? '#f87171' : '#fbbf24', background: 'rgba(51,65,85,0.8)', border: '1px solid #334155', padding: '0.15rem 0.5rem', borderRadius: '6px' }}>
+                                Credibility: {Math.round(report.credibility_score * 100)}%
+                              </span>
+                            )}
+                            {report.auto_delete_in_days != null && (
+                              <span style={{ fontSize: '0.7rem', color: report.auto_delete_in_days <= 5 ? '#f87171' : '#64748b', padding: '0.15rem 0.5rem', borderRadius: '6px' }}>
+                                🗑️ Auto-delete in {report.auto_delete_in_days}d
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Reason */}
+                          <div style={{ background: 'rgba(15,23,42,0.6)', borderRadius: '8px', padding: '0.6rem 0.75rem', marginBottom: '0.5rem' }}>
+                            <div style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 600, marginBottom: '0.2rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Reason flagged</div>
+                            <div style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>{report.spam_reason}</div>
+                          </div>
+
+                          {/* Flags */}
+                          {report.credibility_flags?.length > 0 && (
+                            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                              {report.credibility_flags.map((flag, i) => (
+                                <span key={i} style={{ fontSize: '0.65rem', color: '#94a3b8', background: '#1e293b', border: '1px solid #334155', padding: '0.1rem 0.4rem', borderRadius: '4px', fontFamily: 'monospace' }}>
+                                  {flag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Duplicate of */}
+                          {report.duplicate_of && (
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              Near-duplicate of report <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{report.duplicate_of.slice(0, 8)}…</span>
+                            </div>
+                          )}
+
+                          {/* Timestamps */}
+                          <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.4rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                            <span>Submitted: {new Date(report.submitted_at).toLocaleString()}</span>
+                            {report.spam_flagged_at && <span>Flagged: {new Date(report.spam_flagged_at).toLocaleString()}</span>}
+                            <span style={{ fontFamily: 'monospace' }}>ID: {report.id.slice(0, 8)}…</span>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: 120 }}>
+                          <button
+                            onClick={() => restoreSpamReport(report.id)}
+                            style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', color: '#60a5fa', borderRadius: '8px', padding: '0.4rem 0.75rem', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'center' }}>
+                            ↩ Restore
+                          </button>
+                          <button
+                            onClick={() => deleteSpamReport(report.id)}
+                            style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171', borderRadius: '8px', padding: '0.4rem 0.75rem', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'center' }}>
+                            🗑 Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {Math.ceil(spamTotal / 20) > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <button onClick={() => setSpamPage(p => Math.max(1, p - 1))} disabled={spamPage === 1}
+                      style={{ background: '#334155', border: 'none', color: spamPage === 1 ? '#475569' : '#cbd5e1', borderRadius: '8px', padding: '0.375rem 0.75rem', cursor: spamPage === 1 ? 'not-allowed' : 'pointer' }}>
+                      <ChevronLeft style={{ width: 16, height: 16 }} />
+                    </button>
+                    <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Page {spamPage} of {Math.ceil(spamTotal / 20)}</span>
+                    <button onClick={() => setSpamPage(p => Math.min(Math.ceil(spamTotal / 20), p + 1))} disabled={spamPage === Math.ceil(spamTotal / 20)}
+                      style={{ background: '#334155', border: 'none', color: '#cbd5e1', borderRadius: '8px', padding: '0.375rem 0.75rem', cursor: 'pointer' }}>
                       <ChevronRight style={{ width: 16, height: 16 }} />
                     </button>
                   </div>
